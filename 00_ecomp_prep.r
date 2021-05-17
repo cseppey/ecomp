@@ -16,14 +16,14 @@ registerDoSNOW(cl)
 #---
 # download ####
 
-dir_in <- 'Projets/Ecomp/stat/in/200807/'
-dir_out <- 'Projets/Ecomp/stat/out/200807/'
+dir_in <- 'Projets/Ecomp/stat/in/200821/'
+dir_out <- 'Projets/Ecomp/stat/out/200821/'
 dir_save <- paste0(dir_out, 'saves/') 
 
 dir.create(dir_save, showWarnings=F, recursive=T, mode='775')
 
-funct <- read.table(paste0(dir_in, 'grp_funct.csv'), h=T)
-
+funct <- read.table(paste0(dir_in, 'grp_funct.csv'), h=T, sep=',')
+                          
 recalc <- F
 
 #---
@@ -50,8 +50,6 @@ if(file.exists(file1) & recalc == F){
   ass_tot$seq <- as.character(ass_tot$seq)
   ass_tot$taxo <- as.character(ass_tot$taxo)
   
-  # sort ass according to mr
-
   save(mr_tot, ass_tot, file=file1)    
 }
 
@@ -63,31 +61,38 @@ lim_lgt <- c(100,250)
 hist(sl, breaks=100)
 abline(v=lim_lgt)
 
-lst_ind <- list(full=1:length(sl), pars_lgt=which(sl >= lim_lgt[1] & sl <= lim_lgt[2]), pars_miss_tax=which(ass_tot$taxo != ''))
+lst_ind <- list(full=1:length(sl), 
+                pars_lgt=which(sl >= lim_lgt[1] & sl <= lim_lgt[2]),
+                pars_miss_tax=which(ass_tot$taxo != ''),
+                pars_60=which(ass_tot$pid >= 60))
 
 #---
-for(i in names(lst_ind)){
-  cairo_ps(paste0(dir_out, 'pid_vs_evalue_', i, '.eps'))
+if(recalc){
+  for(i in names(lst_ind)){
+    print(i)
+    
+    cairo_ps(paste0(dir_out, 'pid_vs_evalue_', i, '.eps'))
+    
+    ass <- ass_tot[lst_ind[[i]][is.na(ass_tot$pid) == F],]
+    ssl <- sl[lst_ind[[i]]]
+    
+    plot(ass$seq_lgt, ass$pid, pch=19, cex=0.1)
+    usr <- par('usr')
+    
+    dev.off()
+  }
   
-  ass <- ass_tot[lst_ind[[i]][is.na(ass_tot$pid) == F],]
-  ssl <- sl[lst_ind[[i]]]
+  cairo_ps(paste0(dir_out, 'seq_lgt.eps'))
   
-  plot(ass$seq_lgt, ass$pid, pch=19, cex=0.1)
-  usr <- par('usr')
+  plot(log(table(ass_tot$seq_lgt)), type='l', ylab='log nb OTUs', xaxt='n')
+  axis(1)
+  abline(v=lim_lgt)
   
   dev.off()
 }
 
-cairo_ps(paste0(dir_out, 'seq_lgt.eps'))
-
-plot(log(table(ass_tot$seq_lgt)), type='l', ylab='log nb OTUs', xaxt='n')
-axis(1)
-abline(v=lim_lgt)
-
-dev.off()
-
 #---
-ind_ok <- intersect(lst_ind$pars_lgt, lst_ind$pars_miss_tax)
+ind_ok <- intersect(intersect(lst_ind$pars_lgt, lst_ind$pars_miss_tax), lst_ind$pars_60)
 
 mr_sl <- mr_tot[,ind_ok]
 ass_sl <- droplevels(ass_tot[ind_ok,])
@@ -104,6 +109,7 @@ if(file.exists(file2) & recalc == F){
   load(file2)
 } else {
   chunks <- split(ass_sl, 0:(nrow(ass_sl)-1) %/% 10000)
+  print(length(chunks))
   
   fct <- foreach(i = chunks, .verbose=T, .combine='rbind') %dopar% {
     f <- NULL
@@ -118,7 +124,7 @@ if(file.exists(file2) & recalc == F){
         }
       }
       if(cnt == 0){
-        f <- rbind(f, c('problem',j))
+        f <- rbind(f, c('unknown',j))
       }
     }
     return(f)
@@ -127,7 +133,9 @@ if(file.exists(file2) & recalc == F){
   save(fct, file=file2)    
 }
 
-ass_sl <- cbind.data.frame(ass_sl, fct=fct[,1])
+fct2 <- as.factor(fct[,1])
+fct2 <- factor(fct2, levels=levels(fct2)[c(1,3,2,4)])
+ass_sl <- cbind.data.frame(ass_sl, fct=fct2)
 
 # env
 rn <- row.names(mr_sl)
@@ -139,11 +147,29 @@ row.names(env) <- rn
 env$env[grepl('1021|1022|1023|1024', env$ech)] <- 'soil'
 
 #---
+# removal of the fraction
+
+ind_nfrac <- env$sub %in% c('1','2e','3')
+
+env <- env[ind_nfrac,]
+mr_sl <- mr_sl[ind_nfrac,]
+mr_sl <- mr_sl[,colSums(mr_sl) != 0]
+ass_sl <- ass_sl[names(mr_sl),]
+taxo_sl <- taxo_sl[names(mr_sl),]
+
+#---
 file3 <- paste0(dir_save, 'prep.Rdata')
 save(env, mr_sl, ass_sl, taxo_sl, file=file3)
 
+# display all taxo ####
 
+tax_select <- c('Amoebozoa','Ciliophora')
+taxo_sel <- matrix(unlist(strsplit(sort(unique(apply(taxo_sl[grep(paste(tax_select, collapse='|'),
+                                                                  ass_sl$taxo),-8], 1, function(x) paste(x, collapse=';')))), 
+                                   split=';')), ncol=7, byrow=T)
+names(taxo_sel) <- names(taxo_sl)[-8]
 
+write.table(taxo_sel, paste0(dir_out, 'tax_selec.csv'), quote=F, sep='\t', row.names=F, col.names=F)
 
 
 
